@@ -1,4 +1,9 @@
 // Thread Unsafe Example
+
+/*When you use "Lazy Initialization," you wait to create the Singleton object until 
+the exact moment someone asks for it. In a single-threaded program, this works 
+perfectly. But in a multi-threaded environment, it creates a dangerous Race Condition.*/
+
 #include<bits/stdc++.h>
 #include<thread>
 #include<chrono>
