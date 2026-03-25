@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Modular Monolith Architecture — Deep Dive</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,600;0,800;1,300;1,600&family=IBM+Plex+Mono:wght@300;400;600&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --parchment: #f5f0e8;
+  --paper:     #faf7f2;
+  --ink:       #1a1610;
+  --ink-mid:   #3d3628;
+  --ink-light: #7a6e5f;
+  --ink-faint: #c4b99e;
+  --amber:     #c8720a;
+  --amber-lt:  #f0a84a;
+  --rust:      #a63d2f;
+  --navy:      #1e3155;
+  --navy-lt:   #2d4a7a;
+  --sage:      #4a7060;
+  --line:      #d6cdbf;
+  --card-bg:   #fffdf8;
+  --shadow:    rgba(26,22,16,.08);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--parchment);
+  color: var(--ink);
+  font-family: 'Libre Baskerville', Georgia, serif;
+  font-size: 15px;
+  line-height: 1.75;
+  min-height: 100vh;
+  overflow-x: hidden;
+  /* subtle grid paper texture */
+  background-image:
+    linear-gradient(rgba(192,176,152,.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(192,176,152,.12) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* ── HEADER ── */
+header {
+  background: var(--navy);
+  padding: 52px 48px 44px;
+  position: relative;
+  overflow: hidden;
+}
+header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+header::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0;
+  width: 100%; height: 3px;
+  background: linear-gradient(90deg, var(--amber), var(--amber-lt), transparent);
+}
+.hdr-eyebrow {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--amber-lt);
+  margin-bottom: 16px;
+  position: relative;
+}
+header h1 {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(30px, 4.5vw, 52px);
+  font-weight: 800;
+  color: #f5f0e8;
+  line-height: 1.08;
+  max-width: 680px;
+  position: relative;
+}
+header h1 em {
+  font-style: italic;
+  color: var(--amber-lt);
+  font-weight: 300;
+}
+.hdr-sub {
+  margin-top: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: rgba(245,240,232,.4);
+  position: relative;
+}
+.hdr-badge {
+  display: inline-block;
+  margin-top: 20px;
+  padding: 5px 14px;
+  border: 1px solid rgba(245,240,232,.2);
+  border-radius: 2px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: rgba(245,240,232,.5);
+  position: relative;
+}
+
+/* ── NAV ── */
+.nav-wrap {
+  position: sticky; top: 0; z-index: 200;
+  background: var(--ink);
+  border-bottom: 2px solid var(--amber);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.nav-wrap::-webkit-scrollbar { display: none; }
+nav {
+  display: flex;
+  padding: 0 48px;
+  min-width: max-content;
+  gap: 0;
+}
+nav button {
+  background: none; border: none;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: rgba(245,240,232,.4);
+  padding: 13px 16px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color .2s, border-color .2s;
+  white-space: nowrap;
+}
+nav button:hover { color: rgba(245,240,232,.8); }
+nav button.active { color: var(--amber-lt); border-bottom-color: var(--amber-lt); }
+
+/* ── SECTIONS ── */
+.section {
+  display: none;
+  padding: 52px 48px 96px;
+  max-width: 1080px;
+  animation: rise .3s ease;
+}
+.section.active { display: block; }
+@keyframes rise {
+  from { opacity:0; transform:translateY(12px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+
+.eyebrow {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 12px;
+}
+.eyebrow::after { content:''; flex: 1; height:1px; background: var(--line); }
+
+h2 {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.12;
+  margin-bottom: 6px;
+}
+h2 em { font-style: italic; color: var(--navy); font-weight: 300; }
+
+.lead {
+  font-size: 16px;
+  color: var(--ink-mid);
+  margin: 18px 0 36px;
+  max-width: 680px;
+  line-height: 1.8;
+  border-left: 3px solid var(--amber);
+  padding-left: 18px;
+}
+
+h3 {
+  font-family: 'Fraunces', serif;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--navy);
+  margin: 40px 0 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+h3::after { content:''; flex:1; height:1px; background:var(--line); max-width:120px; }
+
+p { margin-bottom: 14px; color: var(--ink-mid); }
+
+/* ── ANALOGY ── */
+.analogy {
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--amber);
+  border-radius: 4px;
+  padding: 28px 32px;
+  margin: 28px 0;
+  box-shadow: 4px 4px 0 var(--line);
+  position: relative;
+}
+.analogy-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin-bottom: 12px;
+}
+.analogy p { color: var(--ink-mid); }
+.analogy strong { color: var(--ink); }
+
+/* ── CARD GRID ── */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 22px 24px;
+  box-shadow: 2px 2px 0 var(--line);
+  transition: transform .2s, box-shadow .2s;
+}
+.card:hover { transform: translate(-2px,-2px); box-shadow: 4px 4px 0 var(--ink-faint); }
+.card-num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--amber);
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+.card-title { font-family: 'Fraunces', serif; font-size: 15px; font-weight: 600; margin-bottom: 6px; color: var(--ink); }
+.card-body  { font-size: 13px; color: var(--ink-light); line-height: 1.65; font-family: 'Libre Baskerville', serif; }
+
+/* ── COMPARE TABLE ── */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 24px 0;
+  font-size: 13.5px;
+  font-family: 'Libre Baskerville', serif;
+}
+.tbl th {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  padding: 11px 16px;
+  background: var(--navy);
+  color: rgba(245,240,232,.7);
+  border: 1px solid #2d4a7a;
+  text-align: left;
+}
+.tbl td {
+  padding: 11px 16px;
+  border: 1px solid var(--line);
+  color: var(--ink-mid);
+  vertical-align: top;
+  background: var(--card-bg);
+}
+.tbl tr:hover td { background: var(--parchment); }
+
+/* ── BADGE ── */
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 2px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+.badge-amber  { background: rgba(200,114,10,.1); color: var(--amber); border: 1px solid rgba(200,114,10,.3); }
+.badge-navy   { background: rgba(30,49,85,.1);   color: var(--navy);  border: 1px solid rgba(30,49,85,.3); }
+.badge-rust   { background: rgba(166,61,47,.1);  color: var(--rust);  border: 1px solid rgba(166,61,47,.3); }
+.badge-sage   { background: rgba(74,112,96,.1);  color: var(--sage);  border: 1px solid rgba(74,112,96,.3); }
+
+/* ── CODE ── */
+.code {
+  background: var(--ink);
+  border-radius: 4px;
+  padding: 22px 26px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.9;
+  margin: 22px 0;
+  overflow-x: auto;
+  color: #d6cfc4;
+  border-left: 3px solid var(--amber);
+}
+.code .kw  { color: var(--amber-lt); }
+.code .cls { color: #7ec8e3; }
+.code .str { color: #9ecf8a; }
+.code .cmt { color: #5a5244; font-style: italic; }
+.code .ann { color: #c8a2e0; }
+
+/* ── PROS/CONS ── */
+.procon {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin: 24px 0;
+}
+@media(max-width:640px){ .procon { grid-template-columns: 1fr; } }
+.pros, .cons {
+  border-radius: 4px;
+  padding: 24px 26px;
+}
+.pros { background: rgba(74,112,96,.06); border: 1px solid rgba(74,112,96,.25); box-shadow: 3px 3px 0 rgba(74,112,96,.12); }
+.cons { background: rgba(166,61,47,.06); border: 1px solid rgba(166,61,47,.25); box-shadow: 3px 3px 0 rgba(166,61,47,.12); }
+.pros h4, .cons h4 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.pros h4 { color: var(--sage); }
+.cons h4 { color: var(--rust); }
+.pros li, .cons li {
+  list-style: none;
+  padding-left: 18px;
+  position: relative;
+  font-size: 13.5px;
+  color: var(--ink-mid);
+  margin-bottom: 9px;
+  line-height: 1.6;
+  font-family: 'Libre Baskerville', serif;
+}
+.pros li::before { content:'✓'; color:var(--sage); position:absolute; left:0; font-size:11px; top:2px; }
+.cons li::before { content:'✗'; color:var(--rust); position:absolute; left:0; font-size:11px; top:2px; }
+
+/* ── CALLOUT BOXES ── */
+.callout {
+  border-radius: 4px;
+  padding: 18px 22px;
+  margin: 16px 0;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.callout.warn   { background: rgba(200,114,10,.06); border: 1px solid rgba(200,114,10,.3); }
+.callout.danger { background: rgba(166,61,47,.06);  border: 1px solid rgba(166,61,47,.3); }
+.callout.tip    { background: rgba(30,49,85,.06);   border: 1px solid rgba(30,49,85,.25); }
+.callout-icon  { font-size: 18px; flex-shrink:0; margin-top:2px; }
+.callout-title { font-family: 'Fraunces', serif; font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.callout-body  { font-size: 13px; color: var(--ink-light); line-height: 1.65; font-family: 'Libre Baskerville', serif; }
+.callout.warn   .callout-title { color: var(--amber); }
+.callout.danger .callout-title { color: var(--rust); }
+.callout.tip    .callout-title { color: var(--navy); }
+
+/* ── FLOW STEPS ── */
+.steps { margin: 28px 0; }
+.step {
+  display: flex; gap: 22px;
+  margin-bottom: 0;
+  position: relative;
+}
+.step:not(:last-child)::after {
+  content:'';
+  position: absolute;
+  left: 17px; top: 40px;
+  width: 2px;
+  height: calc(100% + 2px);
+  background: var(--line);
+}
+.step-n {
+  flex-shrink:0;
+  width:36px; height:36px;
+  background: var(--navy);
+  border-radius: 50%;
+  display:flex; align-items:center; justify-content:center;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px; font-weight:600;
+  color: var(--amber-lt);
+  position:relative; z-index:1;
+}
+.step-body { padding: 6px 0 30px; }
+.step-title { font-family:'Fraunces',serif; font-size:15px; font-weight:600; color:var(--ink); margin-bottom:4px; }
+.step-desc  { font-size:13px; color:var(--ink-light); line-height:1.65; }
+
+/* ── USE/SKIP ── */
+.useskip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px; margin: 24px 0;
+}
+@media(max-width:640px){ .useskip { grid-template-columns:1fr; } }
+.usecard {
+  border-radius: 4px;
+  padding: 22px 24px;
+}
+.usecard.yes { background: rgba(74,112,96,.05);  border: 1px solid rgba(74,112,96,.2); }
+.usecard.no  { background: rgba(166,61,47,.05);  border: 1px solid rgba(166,61,47,.2); }
+.usecard h4  { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:3px; text-transform:uppercase; margin-bottom:14px; }
+.usecard.yes h4 { color:var(--sage); }
+.usecard.no  h4 { color:var(--rust); }
+.usecard li  { list-style:none; padding-left:18px; position:relative; font-size:13px; color:var(--ink-mid); margin-bottom:9px; line-height:1.55; font-family:'Libre Baskerville',serif; }
+.usecard.yes li::before { content:'→'; color:var(--sage); position:absolute; left:0; }
+.usecard.no  li::before { content:'→'; color:var(--rust); position:absolute; left:0; }
+
+/* ── ARCH DIAGRAM ── */
+.diag-wrap {
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 32px;
+  overflow-x: auto;
+  margin: 28px 0;
+  box-shadow: 4px 4px 0 var(--line);
+}
+.diag-wrap svg { display:block; margin:0 auto; }
+
+/* ── MODULE BLOCK ── */
+.module-section { margin: 28px 0; }
+.mod-row {
+  display: flex; gap: 18px;
+  align-items: flex-start;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.mod-row:last-child { border-bottom:none; }
+.mod-icon {
+  width:46px; height:46px;
+  background: var(--navy);
+  border-radius: 4px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px; flex-shrink:0;
+}
+.mod-name { font-family:'Fraunces',serif; font-size:15px; font-weight:600; color:var(--ink); }
+.mod-desc { font-size:13px; color:var(--ink-light); margin-top:3px; line-height:1.6; font-family:'Libre Baskerville',serif; }
+.mod-tag  { margin-top:6px; }
+
+/* scrollbar */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background: var(--parchment); }
+::-webkit-scrollbar-thumb { background: var(--ink-faint); border-radius:4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hdr-eyebrow">Senior Engineer's Field Guide</div>
+  <h1>The <em>Modular Monolith</em><br/>Architecture</h1>
+  <p class="hdr-sub">// Structure over chaos — the forgotten middle ground between monolith and microservices</p>
+  <div class="hdr-badge">Java · Spring Boot · Domain-Driven Design</div>
+</header>
+
+<div class="nav-wrap">
+  <nav id="nav">
+    <button class="active" onclick="show(0)">01 · Intuition</button>
+    <button onclick="show(1)">02 · What Is It</button>
+    <button onclick="show(2)">03 · Problems Solved</button>
+    <button onclick="show(3)">04 · Components</button>
+    <button onclick="show(4)">05 · How Applied</button>
+    <button onclick="show(5)">06 · How It Works</button>
+    <button onclick="show(6)">07 · Arch Diagram</button>
+    <button onclick="show(7)">08 · Request Flow</button>
+    <button onclick="show(8)">09 · Use / Skip</button>
+    <button onclick="show(9)">10 · Pros & Cons</button>
+    <button onclick="show(10)">11 · Watch Out For</button>
+  </nav>
+</div>
+
+<!-- ══════════════════════════════════════
+     §01 INTUITION
+══════════════════════════════════════ -->
+<section class="section active" id="s0">
+  <div class="eyebrow">§ 01</div>
+  <h2>Building <em>Intuition</em></h2>
+  <p class="lead">Before touching definitions, let's build the right mental picture — because most engineers misunderstand what a modular monolith actually is.</p>
+
+  <div class="analogy">
+    <div class="analogy-tag">🏢 The Office Building Analogy</div>
+    <p>Imagine a <strong>chaotic open-plan office</strong>. Everyone sits together: the sales team, engineers, accountants, HR. They constantly interrupt each other, share the same coffee machine, shout across the floor. Decisions affect everyone. This is a <strong>spaghetti monolith</strong> — everything tangled with everything.</p>
+    <p style="margin-top:12px;">Now imagine the same building, but with <strong>clearly partitioned departments</strong>. Sales has their floor, Engineering has theirs, Finance has its own wing. Each department has its own processes, its own filing system, and deals with others only through formal inter-department requests. They still share the building's electricity, elevators, and reception. That's a <strong>modular monolith</strong>.</p>
+    <p style="margin-top:12px;">The key insight: it's still <strong>one building</strong> (one deployable application), but internally it's <strong>organized into strict, bounded zones</strong>. Order through structure — not by blowing up the building and renting 50 separate offices (microservices).</p>
+  </div>
+
+  <h3>The Spectrum</h3>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-num">ANTI-PATTERN</div>
+      <div class="card-title">Spaghetti Monolith</div>
+      <div class="card-body">One codebase, zero structure. Classes call each other freely. No concept of ownership. The classic "big ball of mud." Every change is dangerous.</div>
+    </div>
+    <div class="card">
+      <div class="card-num">THE MIDDLE PATH →</div>
+      <div class="card-title">Modular Monolith</div>
+      <div class="card-body">One deployable app, strict internal module boundaries, clear ownership, controlled interfaces. The discipline of microservices applied inside a single process.</div>
+    </div>
+    <div class="card">
+      <div class="card-num">COMPLEX ALTERNATIVE</div>
+      <div class="card-title">Microservices</div>
+      <div class="card-body">Many independent processes. Full operational freedom, but enormous infrastructure overhead. Only justified at significant team and traffic scale.</div>
+    </div>
+  </div>
+
+  <h3>The Core Mental Model</h3>
+  <p>A modular monolith answers a very specific question: <em>"How do I get the team-independence and clean boundaries of microservices, without the network complexity, distributed system problems, and operational overhead?"</em></p>
+  <p>The answer: <strong>enforce boundaries in code, not in infrastructure.</strong> Instead of making services talk over HTTP, make modules talk through well-defined Java interfaces. You get 80% of the benefits at 20% of the cost.</p>
+
+  <div class="callout tip">
+    <div class="callout-icon">💡</div>
+    <div>
+      <div class="callout-title">The Architect's Secret</div>
+      <div class="callout-body">Most successful microservice migrations started as well-structured modular monoliths. If your module boundaries are clean in a monolith, extracting a module into a microservice later becomes a relatively mechanical task — swap the interface call for an HTTP call. Start modular, go distributed only when pain demands it.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     §02 WHAT IS IT
+══════════════════════════════════════ -->
+<section class="section" id="s1">
+  <div class="eyebrow">§ 02</div>
+  <h2>What Is <em>Modular Monolith?</em></h2>
+  <p class="lead">A modular monolith is a single deployable application that is internally organized into strongly encapsulated, loosely coupled modules — each owning a distinct business domain.</p>
+
+  <p>There are two parts to the name and both matter equally:</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-num">PART 01</div>
+      <div class="card-title">Monolith</div>
+      <div class="card-body">It's one application. One build artifact (e.g., a single JAR). Deployed as one unit. Runs in one process. Services communicate via method calls — not network requests. Simple to develop, test, and operate.</div>
+    </div>
+    <div class="card">
+      <div class="card-num">PART 02</div>
+      <div class="card-title">Modular</div>
+      <div class="card-body">Internally divided into strict modules. Each module has a public API (interface), private internals, and owns its own domain. Cross-module access is controlled and explicit. No tangled dependencies.</div>
+    </div>
+  </div>
+
+  <h3>The Three Inviolable Rules</h3>
+  <div class="code">
+<span class="cmt">// RULE 1: Modules communicate ONLY through their public API</span>
+<span class="cmt">// ✓ Correct — calling the public interface</span>
+<span class="cls">OrderService</span> orderService = <span class="kw">context</span>.getBean(<span class="cls">OrderService</span>.<span class="kw">class</span>);
+orderService.<span class="kw">placeOrder</span>(orderRequest);
+
+<span class="cmt">// ✗ VIOLATION — reaching into another module's internals</span>
+<span class="cls">OrderRepositoryImpl</span> repo = <span class="kw">new</span> <span class="cls">OrderRepositoryImpl</span>(); <span class="cmt">// BANNED</span>
+
+<span class="cmt">// RULE 2: No circular dependencies between modules</span>
+<span class="cmt">// Order → Payment ✓   |   Order → Payment → Order ✗</span>
+
+<span class="cmt">// RULE 3: Enforce boundaries with package-level visibility</span>
+<span class="cmt">// Internal classes are package-private, not public</span>
+<span class="ann">class</span> <span class="cls">OrderRepositoryImpl</span> { ... } <span class="cmt">// package-private = hidden</span>
+<span class="kw">public interface</span> <span class="cls">OrderService</span>    { ... } <span class="cmt">// public = module API</span>
+  </div>
+
+  <h3>How It Compares</h3>
+  <table class="tbl">
+    <tr>
+      <th>Dimension</th>
+      <th>Spaghetti Monolith</th>
+      <th>Modular Monolith</th>
+      <th>Microservices</th>
+    </tr>
+    <tr>
+      <td><strong>Deployment</strong></td>
+      <td>Single JAR</td>
+      <td>Single JAR</td>
+      <td>Many independent services</td>
+    </tr>
+    <tr>
+      <td><strong>Internal Structure</strong></td>
+      <td>None — free-for-all</td>
+      <td>Strict module boundaries</td>
+      <td>Each service is isolated by process</td>
+    </tr>
+    <tr>
+      <td><strong>Communication</strong></td>
+      <td>Direct method calls, anywhere</td>
+      <td>Method calls via public APIs only</td>
+      <td>HTTP / gRPC / messaging over network</td>
+    </tr>
+    <tr>
+      <td><strong>Data</strong></td>
+      <td>One shared DB, all tables shared</td>
+      <td>One DB, schemas per module (or logical separation)</td>
+      <td>Separate DB per service</td>
+    </tr>
+    <tr>
+      <td><strong>Scalability</strong></td>
+      <td>Scale whole app only</td>
+      <td>Scale whole app only</td>
+      <td>Scale individual services</td>
+    </tr>
+    <tr>
+      <td><strong>Operational Complexity</strong></td>
+      <td>Low</td>
+      <td>Low</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td><strong>Migration Path</strong></td>
+      <td>Hard to migrate — tangled</td>
+      <td>Clean migration path to microservices</td>
+      <td>Already distributed</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ══════════════════════════════════════
+     §03 PROBLEMS SOLVED
+══════════════════════════════════════ -->
+<section class="section" id="s2">
+  <div class="eyebrow">§ 03</div>
+  <h2>Problems <em>It Solves</em></h2>
+  <p class="lead">A modular monolith targets a very specific set of problems — those caused by the unstructured monolith, without introducing the distributed-systems pain of microservices.</p>
+
+  <h3>The Big Ball of Mud Problem</h3>
+  <p>The most common failure mode of growing software is the "Big Ball of Mud" — a monolith where any class can reference any other class. Over time, you end up with 500 classes that all depend on each other in unpredictable ways. Change anything, and you don't know what breaks. No one understands the full system.</p>
+
+  <table class="tbl">
+    <tr>
+      <th>Spaghetti Monolith Problem</th>
+      <th>Real Consequence</th>
+      <th>Modular Monolith Solution</th>
+    </tr>
+    <tr>
+      <td>🍝 <strong>Tangled Dependencies</strong></td>
+      <td>Changing the Order model requires touching 40 unrelated files</td>
+      <td>Module boundary enforces that Order's internals are private. Only the public API is visible.</td>
+    </tr>
+    <tr>
+      <td>💥 <strong>Accidental Coupling</strong></td>
+      <td>Developer A's shortcut creates a dependency from Billing into User's internal cache</td>
+      <td>Compiler/access modifiers prevent this. Package-private classes are simply invisible to other modules.</td>
+    </tr>
+    <tr>
+      <td>🧪 <strong>Untestable Code</strong></td>
+      <td>Can't unit test Order logic without spinning up Payments, Users, and Notifications</td>
+      <td>Each module is independently testable via its public interface. Other modules are mocked.</td>
+    </tr>
+    <tr>
+      <td>👥 <strong>Team Collision</strong></td>
+      <td>5 devs editing the same files daily — constant merge conflicts, broken builds</td>
+      <td>Each team owns a module. Clear file ownership means minimal conflicts.</td>
+    </tr>
+    <tr>
+      <td>🔍 <strong>No Cognitive Boundary</strong></td>
+      <td>New engineer must understand the whole system to change one feature</td>
+      <td>A new engineer on the Payments team only needs to understand the Payments module.</td>
+    </tr>
+    <tr>
+      <td>🚧 <strong>Fear of Refactoring</strong></td>
+      <td>"I'm afraid to change this class — it's referenced everywhere"</td>
+      <td>Module internals can be refactored freely. Only the public API contract must be preserved.</td>
+    </tr>
+  </table>
+
+  <h3>Why Not Just Use Microservices?</h3>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-num">PROBLEM 01</div>
+      <div class="card-title">Too Small a Team</div>
+      <div class="card-body">A team of 8 running 10 microservices means everyone is on-call for multiple services, managing 10 CI pipelines, 10 Docker images. The overhead kills velocity.</div>
+    </div>
+    <div class="card">
+      <div class="card-num">PROBLEM 02</div>
+      <div class="card-title">Domain Uncertainty</div>
+      <div class="card-body">You don't know the right service boundaries yet. Microservices with wrong boundaries are worse than a monolith — you get tight coupling across a network.</div>
+    </div>
+    <div class="card">
+      <div class="card-num">PROBLEM 03</div>
+      <div class="card-title">No DevOps Maturity</div>
+      <div class="card-body">No Kubernetes expertise, no service mesh, no distributed tracing set up. Microservices without this infrastructure become a support nightmare.</div>
+    </div>
+    <div class="card">
+      <div class="card-num">PROBLEM 04</div>
+      <div class="card-title">Distributed Complexity</div>
+      <div class="card-body">Network failures, eventual consistency, distributed transactions — all brand new problems. Most teams aren't ready to handle these on top of feature development.</div>
+    </div>
+  </div>
+
+  <div class="analogy">
+    <div class="analogy-tag">💡 The Core Value Proposition</div>
+    <p>A modular monolith gives you <strong>clean architecture, team autonomy, and easy testability</strong> — all the "developer experience" wins of microservices — while keeping <strong>simple deployment, in-process calls, and ACID transactions</strong> — all the operational wins of a monolith. It's not a compromise; for many systems, it's the optimal architecture.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     §04 COMPONENTS
+══════════════════════════════════════ -->
+<section class="section" id="s3">
+  <div class="eyebrow">§ 04</div>
+  <h2>Key <em>Components</em></h2>
+  <p class="lead">A modular monolith has fewer infrastructure components than microservices, but requires careful attention to its internal architecture. Here's every piece.</p>
+
+  <div class="mod-row">
+    <div class="mod-icon">📦</div>
+    <div>
+      <div class="mod-name">Business Modules (Domain Modules)</div>
+      <div class="mod-desc">The heart of the architecture. Each module encapsulates one business domain — Users, Orders, Payments, Catalog, Notifications. Each has a public API (interface), internal implementation classes, and its own data access layer. The golden rule: no module ever imports the internal classes of another module.</div>
+      <div class="mod-tag"><span class="badge badge-navy">e.g. order-module, payment-module, user-module</span></div>
+    </div>
+  </div>
+
+  <div class="mod-row">
+    <div class="mod-icon">🔌</div>
+    <div>
+      <div class="mod-name">Public Module API (Facade / Interface Layer)</div>
+      <div class="mod-desc">Every module exposes a narrow, intentional public interface — typically a set of Java interfaces and DTOs (Data Transfer Objects). This is the only surface area another module is allowed to interact with. The implementation behind the interface is completely hidden. This is what enforces the boundary.</div>
+      <div class="mod-tag"><span class="badge badge-amber">e.g. OrderService.java, OrderRequest.java, OrderResult.java</span></div>
+    </div>
+  </div>
+
+  <div class="mod-row">
+    <div class="mod-icon">🌐</div>
+    <div>
+      <div class="mod-name">API / Web Layer (Shared Entry Point)</div>
+      <div class="mod-desc">The application's entry point — typically REST controllers in Spring Boot. This layer is thin: it translates HTTP requests into calls to the appropriate module's public API. It doesn't contain business logic. Think of it as the receptionist who routes requests to the right department.</div>
+      <div class="mod-tag"><span class="badge badge-navy">Spring MVC Controllers, request/response mappers</span></div>
+    </div>
+  </div>
+
+  <div class="mod-row">
+    <div class="mod-icon">🗄️</div>
+    <div>
+      <div class="mod-name">Database with Schema-per-Module</div>
+      <div class="mod-desc">One physical database, but each module "owns" its set of tables — enforced by convention (table prefix, separate schema) or tooling (ArchUnit tests). Module A's repository never queries Module B's tables directly. If cross-module data is needed, it goes through the public API. This mirrors the microservice database isolation principle, at lower cost.</div>
+      <div class="mod-tag"><span class="badge badge-sage">PostgreSQL with schemas: orders.*, users.*, payments.*</span></div>
+    </div>
+  </div>
+
+  <div class="mod-row">
+    <div class="mod-icon">📡</div>
+    <div>
+      <div class="mod-name">Internal Event Bus (Optional)</div>
+      <div class="mod-desc">For decoupled cross-module communication that avoids direct method calls. Module A publishes an in-process event ("OrderPlaced"), Module B listens without knowing about Module A. In Spring Boot, this is Spring's ApplicationEventPublisher. Enables the same decoupling pattern as Kafka, but in-memory and without the infrastructure.</div>
+      <div class="mod-tag"><span class="badge badge-amber">Spring ApplicationEventPublisher, Guava EventBus</span></div>
+    </div>
+  </div>
+
+  <div class="mod-row">
+    <div class="mod-icon">🔒</div>
+    <div>
+      <div class="mod-name">Shared Kernel (Carefully)</div>
+      <div class="mod-desc">A small, stable shared library used by all modules — common value objects (Money, Address, UserId), shared exceptions, utility classes, and base domain types. Must be kept minimal and stable. If it changes constantly, every module breaks. The rule: if you're unsure whether something belongs here, it probably doesn't.</div>
+      <div class="mod-tag"><span class="badge badge-rust">common-domain: Money.java, UserId.java, DomainException.java</span></div>
+    </div>
+  </div>
+
+  <div class="mod-row">
+    <div class="mod-icon">🏗️</div>
+    <div>
+      <div class="mod-name">Dependency Enforcement Tooling</div>
+      <div class="mod-desc">The boundary rules are meaningless unless enforced automatically. Architecture tests (ArchUnit for Java) write rules like "no class in package X may access class in package Y" and run them in CI. These tests catch boundary violations before they merge, keeping the modular structure honest over time.</div>
+      <div class="mod-tag"><span class="badge badge-navy">ArchUnit, JDepend, Maven Enforcer Plugin</span></div>
+    </div>
+  </div>
+
+  <div class="mod-row">
+    <div class="mod-icon">🚀</div>
+    <div>
+      <div class="mod-name">Single Deployment Unit</div>
+      <div class="mod-desc">All modules are compiled and bundled into one artifact — a fat JAR in Spring Boot. One CI/CD pipeline, one Docker image, one Kubernetes deployment. No inter-service networking to configure. Deploy the whole app; each module is just code inside it. This dramatically simplifies operations compared to microservices.</div>
+      <div class="mod-tag"><span class="badge badge-sage">One Spring Boot fat JAR, one Docker image, one deployment</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     §05 HOW APPLIED
+══════════════════════════════════════ -->
+<section class="section" id="s4">
+  <div class="eyebrow">§ 05</div>
+  <h2>How It Is <em>Applied</em></h2>
+  <p class="lead">Applying a modular monolith is fundamentally a question of how you divide your system into modules and how you enforce those boundaries in code.</p>
+
+  <h3>Step 1 — Identify Your Modules (Bounded Contexts)</h3>
+  <p>Use Domain-Driven Design to find your natural module boundaries. Look for areas of the business that have their own language, their own concepts, and their own lifecycle. Each bounded context becomes a module.</p>
+  <div class="code">
+<span class="cmt">// E-commerce example — module identification</span>
+
+com.myapp.<span class="cls">users</span>         <span class="cmt">// User accounts, authentication, profiles</span>
+com.myapp.<span class="cls">catalog</span>       <span class="cmt">// Products, categories, pricing, inventory</span>
+com.myapp.<span class="cls">orders</span>         <span class="cmt">// Order lifecycle, cart, checkout flow</span>
+com.myapp.<span class="cls">payments</span>       <span class="cmt">// Payment processing, refunds, invoices</span>
+com.myapp.<span class="cls">shipping</span>       <span class="cmt">// Fulfillment, tracking, warehousing</span>
+com.myapp.<span class="cls">notifications</span>  <span class="cmt">// Email, SMS, push notifications</span>
+com.myapp.<span class="cls">common</span>         <span class="cmt">// Shared kernel — Money, UserId, etc.</span>
+  </div>
+
+  <h3>Step 2 — Structure Each Module Consistently</h3>
+  <p>Every module follows the same internal structure. This predictability is what makes the codebase easy to navigate, even as it grows.</p>
+  <div class="code">
+<span class="cmt">// Internal structure of the 'orders' module</span>
+
+com.myapp.orders/
+  ├── <span class="cls">api/</span>                     <span class="cmt">// PUBLIC — visible to other modules</span>
+  │   ├── <span class="cls">OrderService.java</span>    <span class="cmt">// interface (the contract)</span>
+  │   ├── <span class="cls">OrderRequest.java</span>    <span class="cmt">// input DTO</span>
+  │   └── <span class="cls">OrderResult.java</span>     <span class="cmt">// output DTO</span>
+  │
+  ├── <span class="cls">domain/</span>                  <span class="cmt">// PRIVATE — internal business logic</span>
+  │   ├── <span class="cls">Order.java</span>           <span class="cmt">// domain entity (package-private)</span>
+  │   ├── <span class="cls">OrderItem.java</span>       <span class="cmt">// value object (package-private)</span>
+  │   └── <span class="cls">OrderStatus.java</span>     <span class="cmt">// enum (package-private)</span>
+  │
+  ├── <span class="cls">application/</span>             <span class="cmt">// PRIVATE — use case orchestration</span>
+  │   └── <span class="cls">OrderServiceImpl.java</span> <span class="cmt">// implements OrderService</span>
+  │
+  ├── <span class="cls">infrastructure/</span>          <span class="cmt">// PRIVATE — DB, external calls</span>
+  │   ├── <span class="cls">OrderRepository.java</span>
+  │   └── <span class="cls">OrderJpaEntity.java</span>
+  │
+  └── <span class="cls">events/</span>                  <span class="cmt">// PRIVATE — events this module publishes</span>
+      └── <span class="cls">OrderPlacedEvent.java</span>
+  </div>
+
+  <h3>Step 3 — Enforce Boundaries with ArchUnit</h3>
+  <div class="code">
+<span class="cmt">// ArchUnit test — boundaries enforced in CI</span>
+<span class="ann">@AnalyzeClasses</span>(packages = <span class="str">"com.myapp"</span>)
+<span class="kw">class</span> <span class="cls">ModuleBoundaryTest</span> {
+
+    <span class="ann">@ArchTest</span>
+    <span class="kw">static final</span> ArchRule ordersCannotAccessPaymentInternals =
+        noClasses()
+          .that().resideInAPackage(<span class="str">"..orders.."</span>)
+          .should().accessClassesThat()
+          .resideInAPackage(<span class="str">"..payments.domain.."</span>);
+    <span class="cmt">// This test FAILS the build if a developer breaks the boundary</span>
+}
+  </div>
+
+  <h3>Step 4 — Define Cross-Module Communication</h3>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-num">PATTERN A</div>
+      <div class="card-title">Direct API Call</div>
+      <div class="card-body">When Module A needs data from Module B immediately. Inject Module B's <code>PublicService</code> interface into Module A and call it. Clean, simple, type-safe. Use for synchronous read operations.</div>
+    </div>
+    <div class="card">
+      <div class="card-num">PATTERN B</div>
+      <div class="card-title">Domain Event</div>
+      <div class="card-body">When an action in Module A should trigger reactions in multiple modules without coupling them. Publish an in-process event. Other modules subscribe independently. Use for notifications, side effects.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     §06 HOW IT WORKS
+══════════════════════════════════════ -->
+<section class="section" id="s5">
+  <div class="eyebrow">§ 06</div>
+  <h2>How It <em>Works</em></h2>
+  <p class="lead">Under the hood, a modular monolith runs in a single JVM process. All modules share memory, the thread pool, and the Spring application context — but are disciplined about what they expose.</p>
+
+  <h3>Module Loading and Wiring (Spring Boot)</h3>
+  <p>All modules are scanned by Spring on startup. Each module can register its own beans, configuration, and repositories. Spring acts as the "dependency injection glue" that wires them together — but the interfaces ensure that modules only see what they're meant to see.</p>
+  <div class="code">
+<span class="cmt">// Each module has its own Spring @Configuration class</span>
+<span class="ann">@Configuration</span>
+<span class="ann">@ComponentScan</span>(<span class="str">"com.myapp.orders"</span>)  <span class="cmt">// only scans this module's classes</span>
+<span class="ann">@EnableJpaRepositories</span>(basePackages = <span class="str">"com.myapp.orders.infrastructure"</span>)
+<span class="kw">public class</span> <span class="cls">OrdersModuleConfig</span> { }
+
+<span class="cmt">// The main app just imports all module configs</span>
+<span class="ann">@SpringBootApplication</span>
+<span class="ann">@Import</span>({ <span class="cls">OrdersModuleConfig</span>.<span class="kw">class</span>, <span class="cls">PaymentsModuleConfig</span>.<span class="kw">class</span>,
+           <span class="cls">UsersModuleConfig</span>.<span class="kw">class</span>,  <span class="cls">CatalogModuleConfig</span>.<span class="kw">class</span> })
+<span class="kw">public class</span> <span class="cls">Application</span> { }
+  </div>
+
+  <h3>Synchronous Inter-Module Call</h3>
+  <p>When Order module needs to check the product price from Catalog module, it calls through the public interface. This is a plain Java method call — no network, no serialization, nanosecond latency, ACID-safe.</p>
+  <div class="code">
+<span class="cmt">// OrderServiceImpl.java — inside the Order module</span>
+<span class="kw">public class</span> <span class="cls">OrderServiceImpl</span> <span class="kw">implements</span> <span class="cls">OrderService</span> {
+
+    <span class="cmt">// Injecting the PUBLIC interface of CatalogModule — not its impl!</span>
+    <span class="kw">private final</span> <span class="cls">CatalogService</span> catalogService; <span class="cmt">// interface from catalog.api</span>
+    <span class="kw">private final</span> <span class="cls">PaymentService</span> paymentService; <span class="cmt">// interface from payments.api</span>
+
+    <span class="kw">public</span> <span class="cls">OrderResult</span> <span class="kw">placeOrder</span>(<span class="cls">OrderRequest</span> req) {
+        <span class="cls">Price</span> price = catalogService.<span class="kw">getPrice</span>(req.productId());   <span class="cmt">// in-process call</span>
+        <span class="cls">PaymentResult</span> payment = paymentService.<span class="kw">charge</span>(req.userId(), price); <span class="cmt">// in-process</span>
+        <span class="cls">Order</span> order = <span class="cls">Order</span>.<span class="kw">create</span>(req, price, payment.transactionId());
+        orderRepository.<span class="kw">save</span>(order);
+        eventPublisher.<span class="kw">publishEvent</span>(<span class="kw">new</span> <span class="cls">OrderPlacedEvent</span>(order.id()));
+        <span class="kw">return new</span> <span class="cls">OrderResult</span>(order.id(), <span class="cls">OrderStatus</span>.CONFIRMED);
+    }
+}
+  </div>
+
+  <h3>Asynchronous Event (In-Process)</h3>
+  <p>After the order is saved, an event is published via Spring's event bus. Notification and Inventory modules react independently — they don't need to be called explicitly. Adding a new reactor requires no change to the Order module.</p>
+  <div class="code">
+<span class="cmt">// NotificationsModule — listens for events from any module</span>
+<span class="ann">@Component</span>
+<span class="kw">public class</span> <span class="cls">OrderNotificationHandler</span> {
+
+    <span class="ann">@EventListener</span>  <span class="cmt">// no dependency on Order module's internals!</span>
+    <span class="kw">public void</span> <span class="kw">on</span>(<span class="cls">OrderPlacedEvent</span> event) {
+        emailService.<span class="kw">sendConfirmation</span>(event.orderId());
+    }
+}
+
+<span class="cmt">// If you need the handler to run in a different thread:</span>
+<span class="ann">@Async</span>  <span class="cmt">// truly non-blocking — runs on Spring's TaskExecutor thread pool</span>
+<span class="ann">@TransactionalEventListener</span>(phase = <span class="cls">AFTER_COMMIT</span>)
+<span class="kw">public void</span> <span class="kw">on</span>(<span class="cls">OrderPlacedEvent</span> event) { ... }
+  </div>
+
+  <h3>Database: Schema-per-Module</h3>
+  <p>One PostgreSQL instance, multiple schemas — each owned by a module. JPA entities in the <code>orders</code> module only reference tables in the <code>orders</code> schema. Cross-schema JOINs in repositories are prohibited (enforced via ArchUnit or code review).</p>
+  <div class="code">
+<span class="cmt">-- PostgreSQL schemas per module</span>
+<span class="kw">CREATE SCHEMA</span> orders;       <span class="cmt">-- owned by OrderModule</span>
+<span class="kw">CREATE SCHEMA</span> payments;     <span class="cmt">-- owned by PaymentsModule</span>
+<span class="kw">CREATE SCHEMA</span> users;        <span class="cmt">-- owned by UsersModule</span>
+
+<span class="cmt">-- OrderModule can query freely within its own schema</span>
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> orders.orders <span class="kw">WHERE</span> status = <span class="str">'PLACED'</span>;
+
+<span class="cmt">-- ✗ BANNED — cross-schema JPA query by OrderModule</span>
+<span class="kw">SELECT</span> o.*, u.email <span class="kw">FROM</span> orders.orders o
+  <span class="kw">JOIN</span> users.users u <span class="kw">ON</span> o.user_id = u.id;  <span class="cmt">-- cross-module JOIN = violation</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     §07 ARCH DIAGRAM
+══════════════════════════════════════ -->
+<section class="section" id="s6">
+  <div class="eyebrow">§ 07</div>
+  <h2>Architecture <em>Diagram</em></h2>
+  <p>A visual map of the modular monolith for an e-commerce platform — all modules, their relationships, shared infrastructure, and the entry point.</p>
+
+  <div class="diag-wrap">
+    <svg viewBox="0 0 860 660" xmlns="http://www.w3.org/2000/svg" width="100%" style="max-width:860px; font-family:'IBM Plex Mono',monospace;">
+      <defs>
+        <marker id="arw" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L7,3 z" fill="#1e3155" opacity="0.7"/>
+        </marker>
+        <marker id="arw2" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L7,3 z" fill="#c8720a" opacity="0.8"/>
+        </marker>
+        <marker id="arw3" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L7,3 z" fill="#4a7060" opacity="0.7"/>
+        </marker>
+      </defs>
+
+      <!-- outer app boundary -->
+      <rect x="10" y="10" width="840" height="580" rx="8" fill="none" stroke="#d6cdbf" stroke-width="2" stroke-dasharray="8,4"/>
+      <text x="24" y="30" fill="#c4b99e" font-size="9" letter-spacing="3">ONE DEPLOYABLE APPLICATION (Spring Boot JAR)</text>
+
+      <!-- ── WEB / API LAYER ── -->
+      <rect x="30" y="42" width="800" height="54" rx="6" fill="#1e3155" stroke="none"/>
+      <text x="430" y="63" text-anchor="middle" fill="rgba(245,240,232,.9)" font-size="11" font-weight="600">🌐  REST API Layer  —  Spring MVC Controllers</text>
+      <text x="430" y="82" text-anchor="middle" fill="rgba(245,240,232,.45)" font-size="9">Thin layer — routes HTTP requests into module public APIs only · No business logic here</text>
+
+      <!-- arrows from api to modules -->
+      <line x1="160" y1="96" x2="110" y2="170" stroke="#1e3155" stroke-width="1.5" marker-end="url(#arw)" opacity="0.6"/>
+      <line x1="270" y1="96" x2="270" y2="170" stroke="#1e3155" stroke-width="1.5" marker-end="url(#arw)" opacity="0.6"/>
+      <line x1="430" y1="96" x2="430" y2="170" stroke="#1e3155" stroke-width="1.5" marker-end="url(#arw)" opacity="0.6"/>
+      <line x1="580" y1="96" x2="580" y2="170" stroke="#1e3155" stroke-width="1.5" marker-end="url(#arw)" opacity="0.6"/>
+      <line x1="720" y1="96" x2="740" y2="170" stroke="#1e3155" stroke-width="1.5" marker-end="url(#arw)" opacity="0.6"/>
+
+      <!-- ══ MODULE ROW 1 ══ -->
+      <!-- User Module -->
+      <rect x="30"  y="172" width="150" height="100" rx="6" fill="#fffdf8" stroke="#1e3155" stroke-width="1.5"/>
+      <text x="105" y="196" text-anchor="middle" fill="#1e3155" font-size="11" font-weight="600">👤 User Module</text>
+      <line x1="30" y1="208" x2="180" y2="208" stroke="#d6cdbf" stroke-width="1"/>
+      <text x="105" y="225" text-anchor="middle" fill="#7a6e5f" font-size="8">api / UserService</text>
+      <text x="105" y="238" text-anchor="middle" fill="#c4b99e" font-size="8">domain / infra</text>
+      <text x="105" y="258" text-anchor="middle" fill="#c4b99e" font-size="7">schema: users.*</text>
+
+      <!-- Catalog Module -->
+      <rect x="195" y="172" width="150" height="100" rx="6" fill="#fffdf8" stroke="#1e3155" stroke-width="1.5"/>
+      <text x="270" y="196" text-anchor="middle" fill="#1e3155" font-size="11" font-weight="600">📦 Catalog Module</text>
+      <line x1="195" y1="208" x2="345" y2="208" stroke="#d6cdbf" stroke-width="1"/>
+      <text x="270" y="225" text-anchor="middle" fill="#7a6e5f" font-size="8">api / CatalogService</text>
+      <text x="270" y="238" text-anchor="middle" fill="#c4b99e" font-size="8">domain / infra</text>
+      <text x="270" y="258" text-anchor="middle" fill="#c4b99e" font-size="7">schema: catalog.*</text>
+
+      <!-- Order Module (highlighted - central) -->
+      <rect x="355" y="162" width="150" height="120" rx="6" fill="#fff8ee" stroke="#c8720a" stroke-width="2"/>
+      <text x="430" y="188" text-anchor="middle" fill="#c8720a" font-size="11" font-weight="600">🛒 Order Module</text>
+      <text x="430" y="202" text-anchor="middle" fill="#c8720a" font-size="8">(orchestrator)</text>
+      <line x1="355" y1="213" x2="505" y2="213" stroke="#f0d0a0" stroke-width="1"/>
+      <text x="430" y="228" text-anchor="middle" fill="#7a6e5f" font-size="8">api / OrderService</text>
+      <text x="430" y="241" text-anchor="middle" fill="#c4b99e" font-size="8">domain / infra</text>
+      <text x="430" y="258" text-anchor="middle" fill="#c4b99e" font-size="7">schema: orders.*</text>
+      <text x="430" y="272" text-anchor="middle" fill="#c8720a" font-size="7">publishes: OrderPlacedEvent</text>
+
+      <!-- Payment Module -->
+      <rect x="520" y="172" width="150" height="100" rx="6" fill="#fffdf8" stroke="#1e3155" stroke-width="1.5"/>
+      <text x="595" y="196" text-anchor="middle" fill="#1e3155" font-size="11" font-weight="600">💳 Payment Module</text>
+      <line x1="520" y1="208" x2="670" y2="208" stroke="#d6cdbf" stroke-width="1"/>
+      <text x="595" y="225" text-anchor="middle" fill="#7a6e5f" font-size="8">api / PaymentService</text>
+      <text x="595" y="238" text-anchor="middle" fill="#c4b99e" font-size="8">domain / infra</text>
+      <text x="595" y="258" text-anchor="middle" fill="#c4b99e" font-size="7">schema: payments.*</text>
+
+      <!-- Notification Module -->
+      <rect x="685" y="172" width="150" height="100" rx="6" fill="#fffdf8" stroke="#1e3155" stroke-width="1.5"/>
+      <text x="760" y="192" text-anchor="middle" fill="#1e3155" font-size="10" font-weight="600">🔔 Notification</text>
+      <text x="760" y="205" text-anchor="middle" fill="#1e3155" font-size="10" font-weight="600">Module</text>
+      <line x1="685" y1="216" x2="835" y2="216" stroke="#d6cdbf" stroke-width="1"/>
+      <text x="760" y="232" text-anchor="middle" fill="#7a6e5f" font-size="8">Listens for events</text>
+      <text x="760" y="245" text-anchor="middle" fill="#c4b99e" font-size="8">email / SMS / push</text>
+      <text x="760" y="262" text-anchor="middle" fill="#c4b99e" font-size="7">no DB schema needed</text>
+
+      <!-- ── INTER-MODULE CALLS (sync) ── -->
+      <!-- Order → Catalog (price lookup) -->
+      <path d="M 430 162 C 430 145 270 145 270 172" fill="none" stroke="#1e3155" stroke-width="1.3" stroke-dasharray="5,3" marker-end="url(#arw)" opacity="0.5"/>
+      <text x="348" y="142" fill="#1e3155" font-size="7" text-anchor="middle" opacity="0.7">getPrice()</text>
+
+      <!-- Order → Payment (charge) -->
+      <line x1="505" y1="222" x2="520" y2="222" stroke="#1e3155" stroke-width="1.5" marker-end="url(#arw)" opacity="0.6"/>
+      <text x="512" y="216" fill="#1e3155" font-size="7" text-anchor="middle" opacity="0.7">charge()</text>
+
+      <!-- Order → User (user info) -->
+      <path d="M 430 162 C 430 148 105 148 105 172" fill="none" stroke="#1e3155" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#arw)" opacity="0.4"/>
+      <text x="268" y="142" fill="#1e3155" font-size="7" text-anchor="middle" opacity="0.6">getUser()</text>
+
+      <!-- ── IN-PROCESS EVENT BUS ── -->
+      <rect x="30" y="320" width="800" height="50" rx="6" fill="#faf5eb" stroke="#c8720a" stroke-width="1.5" stroke-dasharray="6,3"/>
+      <text x="430" y="343" text-anchor="middle" fill="#c8720a" font-size="10" font-weight="600">📡  In-Process Event Bus  —  Spring ApplicationEventPublisher</text>
+      <text x="430" y="358" text-anchor="middle" fill="#a07030" font-size="8">OrderPlacedEvent · PaymentProcessedEvent · UserCreatedEvent</text>
+
+      <!-- Order → EventBus -->
+      <line x1="430" y1="282" x2="430" y2="320" stroke="#c8720a" stroke-width="1.5" marker-end="url(#arw2)" opacity="0.8"/>
+      <text x="450" y="304" fill="#c8720a" font-size="8" opacity="0.8">publish</text>
+
+      <!-- EventBus → Notification -->
+      <line x1="720" y1="345" x2="760" y2="272" stroke="#c8720a" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arw2)" opacity="0.6"/>
+      <text x="752" y="310" fill="#c8720a" font-size="8" opacity="0.7">@EventListener</text>
+
+      <!-- EventBus → Shipping -->
+      <line x1="300" y1="370" x2="140" y2="430" stroke="#c8720a" stroke-width="1.1" stroke-dasharray="4,3" marker-end="url(#arw2)" opacity="0.5"/>
+
+      <!-- ── SHIPPING MODULE ── -->
+      <rect x="30" y="432" width="150" height="78" rx="6" fill="#fffdf8" stroke="#4a7060" stroke-width="1.5"/>
+      <text x="105" y="453" text-anchor="middle" fill="#4a7060" font-size="10" font-weight="600">🚚 Shipping Module</text>
+      <line x1="30" y1="462" x2="180" y2="462" stroke="#d6cdbf" stroke-width="1"/>
+      <text x="105" y="476" text-anchor="middle" fill="#7a6e5f" font-size="8">Listens for events</text>
+      <text x="105" y="489" text-anchor="middle" fill="#c4b99e" font-size="7">schema: shipping.*</text>
+      <text x="105" y="500" text-anchor="middle" fill="#c4b99e" font-size="7">@EventListener</text>
+
+      <!-- ── SHARED KERNEL ── -->
+      <rect x="240" y="432" width="380" height="78" rx="6" fill="#f5f0e8" stroke="#c4b99e" stroke-width="1.5" stroke-dasharray="5,3"/>
+      <text x="430" y="455" text-anchor="middle" fill="#7a6e5f" font-size="10" font-weight="600">🔒  Shared Kernel  (common-domain module)</text>
+      <line x1="240" y1="464" x2="620" y2="464" stroke="#d6cdbf" stroke-width="1"/>
+      <text x="430" y="479" text-anchor="middle" fill="#a09080" font-size="8">Money.java · UserId.java · OrderId.java · DomainException.java</text>
+      <text x="430" y="494" text-anchor="middle" fill="#c4b99e" font-size="7">Stable, minimal, rarely changes — used by all modules</text>
+
+      <!-- ── SINGLE DATABASE ── -->
+      <rect x="30" y="560" width="800" height="22" rx="4" fill="#1e3155"/>
+      <text x="430" y="576" text-anchor="middle" fill="rgba(245,240,232,.8)" font-size="9" letter-spacing="2">🗄️  SINGLE POSTGRESQL INSTANCE  —  Separate schemas per module  (orders.* · users.* · catalog.* · payments.* · shipping.*)</text>
+
+      <!-- lines from modules to DB -->
+      <line x1="105" y1="510" x2="105" y2="560" stroke="#d6cdbf" stroke-width="1" opacity="0.5"/>
+      <line x1="430" y1="510" x2="430" y2="560" stroke="#d6cdbf" stroke-width="1" opacity="0.5"/>
+
+      <!-- ── LEGEND ── -->
+      <line x1="20" y1="648" x2="46" y2="648" stroke="#1e3155" stroke-width="1.5"/>
+      <text x="51" y="652" fill="#7a6e5f" font-size="8">Sync call (method)</text>
+      <line x1="160" y1="648" x2="186" y2="648" stroke="#1e3155" stroke-width="1.5" stroke-dasharray="4,3"/>
+      <text x="191" y="652" fill="#7a6e5f" font-size="8">Sync call (interface)</text>
+      <line x1="310" y1="648" x2="336" y2="648" stroke="#c8720a" stroke-width="1.5" stroke-dasharray="4,3"/>
+      <text x="341" y="652" fill="#7a6e5f" font-size="8">Async event (in-process)</text>
+      <rect x="480" y="640" width="10" height="10" rx="2" fill="none" stroke="#c8720a" stroke-width="1.5" stroke-dasharray="3,2"/>
+      <text x="496" y="652" fill="#7a6e5f" font-size="8">Event bus</text>
+      <rect x="560" y="640" width="10" height="10" rx="2" fill="none" stroke="#c4b99e" stroke-width="1.5" stroke-dasharray="3,2"/>
+      <text x="576" y="652" fill="#7a6e5f" font-size="8">Shared kernel</text>
+    </svg>
+  </div>
+
+  <p>Notice: everything runs inside one JVM process — one application boundary (dashed outer box). The REST layer routes to modules. The Order module orchestrates synchronous calls to Catalog, User, and Payment modules. After commit, it fires an in-process event consumed by Notification and Shipping. All data lives in one PostgreSQL, logically separated by schema.</p>
+</section>
+
+<!-- ══════════════════════════════════════
+     §08 REQUEST FLOW
+══════════════════════════════════════ -->
+<section class="section" id="s7">
+  <div class="eyebrow">§ 08</div>
+  <h2>Architectural <em>Request Flow</em></h2>
+  <p class="lead">Let's trace a complete "Place Order" request end to end — every hop, every module interaction, every database write.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-n">1</div>
+      <div class="step-body">
+        <div class="step-title">HTTP Request → REST Controller</div>
+        <div class="step-desc"><code>POST /api/orders</code> arrives at the Spring MVC dispatcher. The <code>OrderController</code> (in the API layer) validates the request body, extracts the authenticated user ID from the JWT, and maps the HTTP payload into an <code>OrderRequest</code> DTO. No business logic here — just HTTP-to-Java translation.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-n">2</div>
+      <div class="step-body">
+        <div class="step-title">Controller → OrderService (Module API)</div>
+        <div class="step-desc">The controller calls <code>orderService.placeOrder(request)</code> — the Order module's public interface. Spring injects the real implementation (<code>OrderServiceImpl</code>). We're now inside the Order module. Everything from here is in-process Java — no network, no serialization overhead.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-n">3</div>
+      <div class="step-body">
+        <div class="step-title">Order Module → Catalog Module (price lookup, sync)</div>
+        <div class="step-desc"><code>OrderServiceImpl</code> needs the current product price. It calls <code>catalogService.getPrice(productId)</code> — the Catalog module's public API. This is a direct Java method call (nanosecond latency). The Catalog module's internals — JPA entity, repository — are completely invisible to Order.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-n">4</div>
+      <div class="step-body">
+        <div class="step-title">Order Module → Payment Module (charge, sync)</div>
+        <div class="step-desc"><code>paymentService.charge(userId, price)</code> is called. Payment module processes the charge (calls the payment gateway, persists a transaction record in its own <code>payments.*</code> schema). Returns a <code>PaymentResult</code> with the transaction ID. This is still in-process — wrapped in the same database transaction if desired.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-n">5</div>
+      <div class="step-body">
+        <div class="step-title">Order persisted + Event published (within @Transactional)</div>
+        <div class="step-desc">Order module persists the <code>Order</code> entity in <code>orders.orders</code> table. Then publishes an <code>OrderPlacedEvent</code> via Spring's <code>ApplicationEventPublisher</code>. Using <code>@TransactionalEventListener(phase = AFTER_COMMIT)</code> ensures the event only fires after the database transaction commits successfully — no phantom events on rollback.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-n">6</div>
+      <div class="step-body">
+        <div class="step-title">HTTP Response → Client</div>
+        <div class="step-desc"><code>OrderService</code> returns an <code>OrderResult</code>. The controller maps it to a JSON response: <code>201 Created</code> with the order ID. Typically sub-50ms end-to-end, since all calls are in-process. No network hops between modules.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-n">7</div>
+      <div class="step-body">
+        <div class="step-title">Event Listeners fire asynchronously (after commit)</div>
+        <div class="step-desc">After the transaction commits, Spring fires the <code>OrderPlacedEvent</code> to all listeners on a background thread pool. <strong>NotificationModule</strong>: sends confirmation email. <strong>ShippingModule</strong>: creates a shipment record. <strong>AnalyticsModule</strong>: records the sale. None of these know about each other — pure event-driven decoupling, all in-process.</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>The Transaction Advantage</h3>
+  <div class="callout tip">
+    <div class="callout-icon">💎</div>
+    <div>
+      <div class="callout-title">ACID Transactions Across Modules — For Free</div>
+      <div class="callout-body">Because all modules share one database connection pool, steps 2–5 can be wrapped in a single <code>@Transactional</code> boundary. If payment fails, the order is NOT saved. If order save fails, the payment record is rolled back. This is trivially free in a modular monolith. In microservices, this requires a Saga pattern — complex compensating transactions, eventual consistency, and significant engineering effort. This is one of the most underrated advantages of the modular monolith.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     §09 USE / SKIP
+══════════════════════════════════════ -->
+<section class="section" id="s8">
+  <div class="eyebrow">§ 09</div>
+  <h2>Use Cases & <em>Skip Cases</em></h2>
+  <p class="lead">A modular monolith isn't for everyone and every stage. Here's the honest assessment of when it's the right call.</p>
+
+  <div class="useskip">
+    <div class="usecard yes">
+      <h4>✅ Use Modular Monolith When</h4>
+      <ul>
+        <li>Team has 5–30 engineers — big enough for structure, small enough that microservice overhead kills velocity</li>
+        <li>Domain boundaries are still being discovered — avoid locking in wrong service boundaries early</li>
+        <li>You need ACID transactions across multiple business domains (orders + payments, etc.)</li>
+        <li>Low to medium traffic — no need to scale individual features independently</li>
+        <li>Limited DevOps maturity — no Kubernetes expertise yet, no need for it</li>
+        <li>Building a product from scratch — establish clean architecture before premature distribution</li>
+        <li>B2B SaaS, internal tools, enterprise apps with complex domain logic</li>
+        <li>You want a clear migration path to microservices when the time is right</li>
+        <li>Your current monolith is a "big ball of mud" — modularize before extracting</li>
+      </ul>
+    </div>
+    <div class="usecard no">
+      <h4>🚫 Skip It When</h4>
+      <ul>
+        <li>Individual features have radically different scaling requirements that demand independent scaling right now</li>
+        <li>Teams are 50+ engineers — coordination overhead demands true service independence</li>
+        <li>Different features require different technology stacks that are genuinely incompatible</li>
+        <li>You have features with vastly different availability SLAs (99.9% core vs 95% analytics)</li>
+        <li>You're already running microservices well — going backwards rarely makes sense</li>
+        <li>Features must be independently deployable by separate release trains</li>
+        <li>Strong regulatory requirements mandate strict physical data isolation between domains</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>The Goldilocks Zone</h3>
+  <table class="tbl">
+    <tr>
+      <th>Company Stage</th>
+      <th>Engineers</th>
+      <th>Recommended Architecture</th>
+      <th>Why</th>
+    </tr>
+    <tr>
+      <td>🌱 Seed / Pre-product</td>
+      <td>1–4</td>
+      <td><span class="badge badge-amber">Simple Monolith</span></td>
+      <td>Ship fast, validate the idea. No time for architecture.</td>
+    </tr>
+    <tr>
+      <td>📈 Early Growth</td>
+      <td>5–12</td>
+      <td><span class="badge badge-navy">Modular Monolith</span></td>
+      <td>Add structure before the codebase becomes unmaintainable.</td>
+    </tr>
+    <tr>
+      <td>🏢 Growth</td>
+      <td>12–40</td>
+      <td><span class="badge badge-navy">Modular Monolith (primary)</span></td>
+      <td>Right-sized for team. Modules provide team independence without infra overhead.</td>
+    </tr>
+    <tr>
+      <td>🚀 Scale</td>
+      <td>40–100</td>
+      <td><span class="badge badge-sage">Selective Microservices</span></td>
+      <td>Extract 2–3 modules with proven scaling needs. Keep the rest modular.</td>
+    </tr>
+    <tr>
+      <td>🌐 Enterprise</td>
+      <td>100+</td>
+      <td><span class="badge badge-rust">Full Microservices</span></td>
+      <td>Teams need full autonomy. Organizational scale demands it.</td>
+    </tr>
+  </table>
+
+  <div class="analogy">
+    <div class="analogy-tag">🔑 The Key Insight</div>
+    <p>Shopify, Stack Overflow, and Basecamp have all run significant portions of their business on well-structured monoliths at substantial scale. The modular monolith is not a stepping stone you're forced to abandon — for many companies, it's the permanent, correct answer. The goal is always to <strong>match architecture to organizational reality</strong>, not to cargo-cult whatever Netflix does.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     §10 PROS & CONS
+══════════════════════════════════════ -->
+<section class="section" id="s9">
+  <div class="eyebrow">§ 10</div>
+  <h2>Pros <em>&amp; Cons</em></h2>
+  <p class="lead">An honest accounting of what you gain and give up — relative to both a spaghetti monolith and microservices.</p>
+
+  <div class="procon">
+    <div class="pros">
+      <h4>✅ Advantages</h4>
+      <ul>
+        <li><strong>Simple Deployment</strong> — One JAR. One CI/CD pipeline. One Docker image. Deploy in 2 minutes, not 45.</li>
+        <li><strong>ACID Transactions</strong> — Cross-module operations in one database transaction. Free consistency that costs enormous effort in microservices.</li>
+        <li><strong>Zero Network Latency</strong> — All inter-module calls are Java method invocations. No serialization, no timeouts, no retries.</li>
+        <li><strong>No Distributed System Problems</strong> — No eventual consistency, no network partitions, no distributed tracing needed.</li>
+        <li><strong>Clean Codebase</strong> — Enforced boundaries prevent the "big ball of mud." New engineers understand their module without learning the whole system.</li>
+        <li><strong>Easy Refactoring</strong> — Module internals can be completely rewritten without breaking other modules, as long as the public API is preserved.</li>
+        <li><strong>Microservices Migration Path</strong> — When a module is ready to be extracted, boundaries are already clean. It's a mechanical transformation.</li>
+        <li><strong>Low Operational Cost</strong> — No Kubernetes expertise needed. No service mesh, no distributed logging infrastructure required from day one.</li>
+        <li><strong>Easy End-to-End Testing</strong> — Spin up one Spring Boot application for integration tests. No service mocking infrastructure.</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>✗ Limitations</h4>
+      <ul>
+        <li><strong>Whole-App Scaling Only</strong> — Can't scale just the "search" feature independently. Must scale the entire application.</li>
+        <li><strong>Single Technology Stack</strong> — All modules must use the same language and (mostly) the same framework. Can't use Python for ML in one module.</li>
+        <li><strong>Shared Deployment Risk</strong> — A catastrophic bug in any module can crash the whole application. No fault isolation between modules.</li>
+        <li><strong>Discipline Requirement</strong> — Boundaries only hold if the team enforces them. Without ArchUnit tests and code review culture, they erode over time.</li>
+        <li><strong>Shared Thread Pool</strong> — One slow module (e.g., a blocking I/O call) can consume all available threads and starve the rest of the application.</li>
+        <li><strong>Database Sharing Risk</strong> — One misconfigured slow query can degrade performance for all modules. With microservices, each service has its own pool.</li>
+        <li><strong>Limited Team Autonomy at Scale</strong> — At 50+ engineers, even clean module boundaries can feel constraining. True independence eventually requires separate deployables.</li>
+        <li><strong>Long Build Time (at extremes)</strong> — At 20+ modules, build and test times grow. Mitigated by parallel builds but eventually a concern.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>vs Microservices: Net Score by Dimension</h3>
+  <table class="tbl">
+    <tr><th>Dimension</th><th>Modular Monolith</th><th>Microservices</th></tr>
+    <tr><td>Developer Productivity (small team)</td><td><span class="badge badge-sage">High ✓✓</span></td><td><span class="badge badge-rust">Lower (infra overhead)</span></td></tr>
+    <tr><td>Deployment Simplicity</td><td><span class="badge badge-sage">Very Simple ✓✓</span></td><td><span class="badge badge-amber">Complex (K8s required)</span></td></tr>
+    <tr><td>Data Consistency</td><td><span class="badge badge-sage">ACID Transactions ✓✓</span></td><td><span class="badge badge-rust">Eventual (Sagas needed)</span></td></tr>
+    <tr><td>Independent Scaling</td><td><span class="badge badge-rust">Not Possible ✗</span></td><td><span class="badge badge-sage">Full ✓✓</span></td></tr>
+    <tr><td>Fault Isolation</td><td><span class="badge badge-amber">Partial (same process)</span></td><td><span class="badge badge-sage">Strong ✓✓</span></td></tr>
+    <tr><td>Team Autonomy at Scale</td><td><span class="badge badge-amber">Good up to ~40 eng</span></td><td><span class="badge badge-sage">Excellent ✓✓</span></td></tr>
+    <tr><td>Debugging &amp; Observability</td><td><span class="badge badge-sage">Easy ✓✓</span></td><td><span class="badge badge-rust">Hard (distributed tracing)</span></td></tr>
+    <tr><td>Migration to Microservices</td><td><span class="badge badge-sage">Clean path ✓</span></td><td><span class="badge badge-navy">Already there</span></td></tr>
+  </table>
+</section>
+
+<!-- ══════════════════════════════════════
+     §11 WATCH OUT FOR
+══════════════════════════════════════ -->
+<section class="section" id="s10">
+  <div class="eyebrow">§ 11</div>
+  <h2>Things to Be <em>Careful Of</em></h2>
+  <p class="lead">These are the patterns that silently corrupt a modular monolith back into a spaghetti ball. Every team that doesn't actively guard against them eventually faces them.</p>
+
+  <div class="callout danger">
+    <div class="callout-icon">🔥</div>
+    <div>
+      <div class="callout-title">Boundary Erosion — "Just This Once"</div>
+      <div class="callout-body">The #1 killer. A developer needs something from another module "just this once" — they make the internal class <code>public</code> instead of exposing it through the proper API. Then it happens again. Within 18 months, the boundaries are meaningless. Counter-measure: <strong>ArchUnit tests in CI that fail the build on violations.</strong> Automated enforcement, not trust.</div>
+    </div>
+  </div>
+
+  <div class="callout danger">
+    <div class="callout-icon">💥</div>
+    <div>
+      <div class="callout-title">Shared Database Tables (The Silent Killer)</div>
+      <div class="callout-body">Module A writes directly to a table "owned" by Module B. This creates hidden coupling that doesn't show up in code reviews — only at runtime, when Module B's schema change breaks Module A in production. Enforce table ownership strictly: each module's JPA entities may only map to that module's schema. Automated with ArchUnit or naming convention tests.</div>
+    </div>
+  </div>
+
+  <div class="callout danger">
+    <div class="callout-icon">🔄</div>
+    <div>
+      <div class="callout-title">Circular Dependencies</div>
+      <div class="callout-body">Order depends on Payment, Payment depends on Order. Now you can't change either without coordinating with the other — and you can't extract either into a microservice later because they're circular. Rule: dependencies flow in ONE direction. Draw your module dependency graph and make sure it's a DAG (Directed Acyclic Graph). Enforced with ArchUnit or Maven module structure.</div>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-icon">⚠️</div>
+    <div>
+      <div class="callout-title">Anemic Module APIs (Too Much Leakage)</div>
+      <div class="callout-body">The public API exposes so many methods and raw domain objects that it's essentially making the whole module public. This defeats encapsulation — callers can now do anything with the module's data, not just what the module intends. Keep APIs intentional and minimal. Expose only what external modules genuinely need. Use dedicated DTOs, not your JPA entities.</div>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-icon">⚠️</div>
+    <div>
+      <div class="callout-title">The God Module / God Service</div>
+      <div class="callout-body">One module grows to own 60% of the system's logic. Everything else depends on it. This is just a modular monolith with bad boundaries. Revisit your domain model. If "Order" is doing pricing logic, user management, and inventory management — those are three modules that got accidentally merged. The module should be cohesive around one business concept.</div>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-icon">⚠️</div>
+    <div>
+      <div class="callout-title">Transactional Event Side-Effects</div>
+      <div class="callout-body">Using <code>@EventListener</code> (synchronous, same transaction) instead of <code>@TransactionalEventListener(AFTER_COMMIT)</code> means your event handler runs inside the calling transaction. If the handler fails, it can roll back the original transaction unexpectedly. Always use <code>AFTER_COMMIT</code> for event handlers that are meant to be side-effects (notifications, analytics). Understand exactly which transaction boundary your event handler participates in.</div>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-icon">⚠️</div>
+    <div>
+      <div class="callout-title">Thread Pool Starvation</div>
+      <div class="callout-body">In a shared process, a blocking call in one module (e.g., calling a slow third-party API synchronously) uses a Tomcat thread. If enough requests hit that slow path, all threads are consumed and the whole application becomes unresponsive — even the fast modules. Use <code>@Async</code> for anything slow, or configure separate thread pools for blocking I/O in different modules.</div>
+    </div>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">💡</div>
+    <div>
+      <div class="callout-title">The Architecture Test Suite is Not Optional</div>
+      <div class="callout-body">In microservices, boundaries are enforced by the network — you literally can't call a private class in another service. In a modular monolith, Java's access modifiers are the only enforcement mechanism — and they can be bypassed with reflection, or simply ignored with <code>public</code> classes. <strong>ArchUnit tests are your substitute for the network boundary.</strong> They must be written on day one and run on every CI build. Without them, your modular monolith degrades into a spaghetti monolith within 12–18 months.</div>
+    </div>
+  </div>
+
+  <h3>The Golden Rules</h3>
+  <div class="code">
+<span class="kw">RULE 1:</span>  Every module has ONE public interface. Internals are package-private.
+<span class="kw">RULE 2:</span>  Modules talk through APIs only. Never import internal classes of another module.
+<span class="kw">RULE 3:</span>  Dependencies are acyclic. No circular dependencies, ever.
+<span class="kw">RULE 4:</span>  Each module owns its tables. No cross-module JPA joins or direct table access.
+<span class="kw">RULE 5:</span>  Expose DTOs, not domain entities, in public APIs.
+<span class="kw">RULE 6:</span>  ArchUnit tests enforce boundaries in CI. Automated, not manual.
+<span class="kw">RULE 7:</span>  Shared Kernel is minimal. If in doubt, keep it OUT of shared.
+<span class="kw">RULE 8:</span>  Use @TransactionalEventListener(AFTER_COMMIT) for event side-effects.
+  </div>
+</section>
+
+<script>
+  function show(i) {
+    document.querySelectorAll('.section').forEach((s,j)=> s.classList.toggle('active', i===j));
+    document.querySelectorAll('#nav button').forEach((b,j)=> b.classList.toggle('active', i===j));
+    window.scrollTo({top:0, behavior:'smooth'});
+  }
+</script>
+</body>
+</html>
